@@ -96,23 +96,23 @@ mpa_header ReadMPAHeader (uint8_t* headerLoc) {
     hdr.crcEnabled = (bool) crcEnabledBits;
 
     // Store the bitrate, which varies depending on bitrateBits, the MPEG version and the layer.
-    //     bits	    V1,L1	V1,L2	V1,L3	V2,L1	V2, L2 & L3
-    //     0000	    free	free	free	free	free
-    //     0001	    32	    32	    32	    32	    8
-    //     0010	    64	    48	    40	    48	    16
-    //     0011	    96	    56	    48	    56	    24
-    //     0100	    128	    64	    56	    64	    32
-    //     0101	    160	    80	    64	    80	    40
-    //     0110	    192	    96	    80	    96	    48
-    //     0111	    224	    112	    96	    112	    56
-    //     1000	    256	    128	    112	    128	    64
-    //     1001	    288	    160	    128	    144	    80
-    //     1010	    320	    192	    160	    160	    96
-    //     1011	    352	    224	    192	    176	    112
-    //     1100	    384	    256	    224	    192	    128
-    //     1101	    416	    320	    256	    224	    144
-    //     1110	    448	    384	    320	    256	    160
-    //     1111	    bad	    bad	    bad	    bad	    bad
+    //     bits     V1,L1   V1,L2   V1,L3   V2,L1   V2, L2 & L3
+    //     0000     free    free    free    free    free
+    //     0001     32      32      32      32      8
+    //     0010     64      48      40      48      16
+    //     0011     96      56      48      56      24
+    //     0100     128     64      56      64      32
+    //     0101     160     80      64      80      40
+    //     0110     192     96      80      96      48
+    //     0111     224     112     96      112     56
+    //     1000     256     128     112     128     64
+    //     1001     288     160     128     144     80
+    //     1010     320     192     160     160     96
+    //     1011     352     224     192     176     112
+    //     1100     384     256     224     192     128
+    //     1101     416     320     256     224     144
+    //     1110     448     384     320     256     160
+    //     1111     bad     bad     bad     bad     bad
     // (V2 means both MPEG2 and MPEG2.5)
     switch (bitrateBits) {
     case 0b0000:
@@ -263,11 +263,11 @@ mpa_header ReadMPAHeader (uint8_t* headerLoc) {
     }
 
     // Store the sample rate.
-    //     bits	    MPEG1	    MPEG2	    MPEG2.5
-    //     00	    44100 Hz	22050 Hz	11025 Hz
-    //     01	    48000 Hz	24000 Hz	12000 Hz
-    //     10	    32000 Hz	16000 Hz	8000 Hz
-    //     11	    reserved    reserved    reserved
+    //     bits     MPEG1       MPEG2       MPEG2.5
+    //     00       44100 Hz    22050 Hz    11025 Hz
+    //     01       48000 Hz    24000 Hz    12000 Hz
+    //     10       32000 Hz    16000 Hz    8000 Hz
+    //     11       reserved    reserved    reserved
     switch (samplerateBits) {
     case 0b00:
         if      (hdr.mpegVersion == MPEG_V1)  hdr.samplerate = 44100;
