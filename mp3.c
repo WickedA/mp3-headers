@@ -371,7 +371,7 @@ size_t GetID3v2TagSize (uint8_t* loc) {
         bool hasFooter = (bool) ((loc[5] & 0b00010000) >> 4);
         if (hasFooter) length += 20;
         else           length += 10;
-        fprintf(stderr, "ID3v2 tag found at %lld with size %ld\n", (uint64_t) loc, length);
+        fprintf(stderr, "ID3v2 tag found with length %ld\n", length);
         return length;
     } else {
         return 0;
@@ -383,7 +383,7 @@ typedef struct mem_file_s {
     size_t   size;
     uint8_t* mem;
 } mem_file;
-mem_file ReadFile (char* filename) {
+mem_file ReadFileIntoMemory (char* filename) {
     FILE* stream = fopen(filename, "r");
     if (stream == NULL) {
         fprintf(stderr, "ReadFile: failed to open %s\n", filename);
@@ -394,7 +394,7 @@ mem_file ReadFile (char* filename) {
     size_t   size = ftell(stream);
     uint8_t* mem  = (uint8_t*) malloc(size + 1);
     if (mem == NULL) {
-        fprintf(stderr, "ReadFile: %ld byte allocation failed\n", size);
+        fprintf(stderr, "ReadFile: %lld byte allocation failed\n", (uint64_t) size);
         exit(1);
     }
         
@@ -408,16 +408,16 @@ mem_file ReadFile (char* filename) {
 }
 
 int main() {
-    mem_file testFileObj = ReadFile("test.mp3");
+    mem_file testFileObj = ReadFileIntoMemory("test.mp3");
+    size_t fileStart  = (size_t) testFileObj.mem;
     uint8_t* firstLoc = testFileObj.mem + GetID3v2TagSize(testFileObj.mem);
     uint8_t* lastLoc  = testFileObj.mem + testFileObj.size;
 
-    printf("Starting MPEG header search at %08llx...\n", (uint64_t) firstLoc);
-    //printf("main:  lastLoc = %lld\n", (uint64_t) lastLoc);
+    printf("Starting MPEG header search at %08llx...\n", (uint64_t) (firstLoc - fileStart));
 
     mpa_header firstHeader = GetFirstHeader(firstLoc, lastLoc);
     if (firstHeader.valid) {
-        printf("First valid header at %08llx:\n", (uint64_t) firstHeader.location);
+        printf("First valid header at %08llx:\n", (uint64_t) (firstHeader.location - fileStart));
         printf("  MPEG%s Layer %d\n",
             ((firstHeader.mpegVersion == MPEG_V1)? "1" :
                 (firstHeader.mpegVersion == MPEG_V2)? "2": "2.5"),
@@ -451,8 +451,8 @@ int main() {
         if (printAllHeaders || (
                 header.mpegVersion == firstHeader.mpegVersion || 
                 header.mpegLayer   == firstHeader.mpegLayer)) {
-            printf(" %08llx | V%s | %d | %4d | %5d | %s | %s | %s | %5ld \n",
-                (uint64_t) (header.location - firstHeader.location),
+            printf(" %08llx | V%s | %d | %4d | %5d | %s | %s | %s | %5lld \n",
+                (uint64_t) (header.location - fileStart),
                 (header.mpegVersion == MPEG_V1)? "1  " :
                     (header.mpegVersion == MPEG_V2)? "2  " : "2.5",
                 header.mpegLayer,
@@ -461,7 +461,7 @@ int main() {
                 header.crcEnabled?    "Y" : " ",
                 header.copyrightFlag? "Y" : " ",
                 header.originalFlag?  "Y" : " ",
-                header.frameSize);
+                (uint64_t) header.frameSize);
             --nHeaders;
         }
         header = GetNextHeader(&header, lastLoc);
