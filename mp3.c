@@ -7,7 +7,7 @@
 // - 11-bit syncword (all bits must be set)
 // -  2-bit MPEG version (00 MPEG2.5, 10 MPEG2, 11 MPEG1)
 // -  2-bit MPEG layer (01 Layer3, 10 Layer2, 11 Layer1)
-// -  1-bit error protection flag (if 1, 16-bit CRC follows header)
+// -  1-bit error checking flag (if 1, 16-bit CRC follows header)
 // -  4-bit bitrate index
 // -  2-bit sampling rate index
 // -  1-bit padding flag (is MP3 frame padded to fit the bitrate?)
@@ -18,27 +18,29 @@
 // -  1-bit original flag
 // -  2-bit obscure emphasis thing
 
+// Struct to contain all header data in an accessible format, for any given header:
 typedef struct mpa_header_s {
-    bool     valid;
-    uint8_t* location;
-    size_t   frameSize;
+    bool     valid;                     // whether the header is valid or not
+    uint8_t* location;                  // the header's location in memory
+    size_t   frameSize;                 // the frame's total size in bytes, including header
 
-    uint8_t  mpegVersion;
-    uint8_t  mpegLayer;
-    bool     crcEnabled;
-    uint16_t bitrate;
-    uint16_t samplerate;
-    bool     framePadded;
-    uint8_t  channelMode;
-    uint8_t  cmLayer2BandLower;
-    uint8_t  cmLayer2BandUpper;
-    bool     cmLayer3IntensityStereo;
-    bool     cmLayer3MSStereo;
-    bool     copyrightFlag;
-    bool     originalFlag;
-    uint8_t  emphasisMode;
+    uint8_t  mpegVersion;               // either MPEG_V1, MPEG_V2 or MPEG_V25
+    uint8_t  mpegLayer;                 // either 1, 2 or 3
+    bool     crcEnabled;                // whether error checking is enabled for this header
+    uint16_t bitrate;                   // bitrate in kbps
+    uint16_t samplerate;                // sample rate in Hz
+    bool     framePadded;               // whether the frame is padded
+    uint8_t  channelMode;               // one of the CHANNEL_MODE_* constants
+    uint8_t  cmLayer2BandLower;         // layer2 intensity stereo lower band
+    uint8_t  cmLayer2BandUpper;         // layer2 intensity stereo upper band
+    bool     cmLayer3IntensityStereo;   // layer3 intensity stereo enabled/disabled
+    bool     cmLayer3MSStereo;          // layer3 MS stereo enabled/disabled
+    bool     copyrightFlag;             // copyright flag
+    bool     originalFlag;              // original flag
+    uint8_t  emphasisMode;              // one of the EMPHASIS_* constants
 } mpa_header;
 
+// Relevant constants:
 #define INVALID_HEADER ((mpa_header) {0})
 
 const uint8_t MPEG_V1  = 1;
@@ -54,7 +56,7 @@ const uint8_t EMPHASIS_NONE      = 1;
 const uint8_t EMPHASIS_50_15_MS  = 2;
 const uint8_t EMPHASIS_CCITT_J17 = 3;
 
-// Read an MPEG audio header from the given memory location and return an mpa_header object.
+// Try to read an MPEG audio header from the given memory location. Returns an mpa_header object.
 mpa_header ReadMPAHeader (uint8_t* headerLoc) {
     mpa_header hdr = { 0 };
     hdr.valid     = true;
@@ -114,153 +116,48 @@ mpa_header ReadMPAHeader (uint8_t* headerLoc) {
     //     1110     448     384     320     256     160
     //     1111     bad     bad     bad     bad     bad
     // (V2 means both MPEG2 and MPEG2.5)
+    
+    // X-Macros are used to generate the code that decides which bitrate to store.
+    
+    #define X_BITRATES \
+        X(0b0001, 32,  32,  32,  32,  8)   \
+        X(0b0010, 64,  48,  40,  48,  16)  \
+        X(0b0011, 96,  56,  48,  56,  24)  \
+        X(0b0100, 128, 64,  56,  64,  32)  \
+        X(0b0101, 160, 80,  64,  80,  40)  \
+        X(0b0110, 192, 96,  80,  96,  48)  \
+        X(0b0111, 224, 112, 96,  112, 56)  \
+        X(0b1000, 256, 128, 112, 128, 64)  \
+        X(0b1001, 288, 160, 128, 144, 80)  \
+        X(0b1010, 320, 192, 160, 160, 96)  \
+        X(0b1011, 352, 224, 192, 176, 112) \
+        X(0b1100, 384, 256, 224, 192, 128) \
+        X(0b1101, 416, 320, 256, 224, 144) \
+        X(0b1110, 448, 384, 320, 256, 160)
+    
+    #define X(MATCH, BITRATE_V1L1, BITRATE_V1L2, BITRATE_V1L3, BITRATE_V2L1, BITRATE_V2LX) \
+        case MATCH: \
+            if (hdr.mpegVersion == MPEG_V1) { \
+                if      (hdr.mpegLayer == 3) hdr.bitrate = BITRATE_V1L3; \
+                else if (hdr.mpegLayer == 2) hdr.bitrate = BITRATE_V1L2; \
+                else if (hdr.mpegLayer == 1) hdr.bitrate = BITRATE_V1L1; \
+            } else { \
+                if (hdr.mpegLayer == 1) hdr.bitrate = BITRATE_V2L1; \
+                else                    hdr.bitrate = BITRATE_V2LX; \
+            } \
+            break;
+    
     switch (bitrateBits) {
-    case 0b0000:
-        hdr.bitrate = 0;
-        break;
-    case 0b0001:
-        if (hdr.mpegVersion == MPEG_V1) {
-            if      (hdr.mpegLayer == 1) hdr.bitrate = 32;
-            else if (hdr.mpegLayer == 2) hdr.bitrate = 32;
-            else if (hdr.mpegLayer == 3) hdr.bitrate = 32;
-        } else {
-            if (hdr.mpegLayer == 1) hdr.bitrate = 32;
-            else                    hdr.bitrate = 8;
-        }
-        break;
-    case 0b0010:
-        if (hdr.mpegVersion == MPEG_V1) {
-            if      (hdr.mpegLayer == 1) hdr.bitrate = 64;
-            else if (hdr.mpegLayer == 2) hdr.bitrate = 48;
-            else if (hdr.mpegLayer == 3) hdr.bitrate = 40;
-        } else {
-            if (hdr.mpegLayer == 1) hdr.bitrate = 48;
-            else                    hdr.bitrate = 16;
-        }
-        break;
-    case 0b0011:
-        if (hdr.mpegVersion == MPEG_V1) {
-            if      (hdr.mpegLayer == 1) hdr.bitrate = 96;
-            else if (hdr.mpegLayer == 2) hdr.bitrate = 56;
-            else if (hdr.mpegLayer == 3) hdr.bitrate = 48;
-        } else {
-            if (hdr.mpegLayer == 1) hdr.bitrate = 56;
-            else                    hdr.bitrate = 24;
-        }
-        break;
-    case 0b0100:
-        if (hdr.mpegVersion == MPEG_V1) {
-            if      (hdr.mpegLayer == 1) hdr.bitrate = 128;
-            else if (hdr.mpegLayer == 2) hdr.bitrate = 64;
-            else if (hdr.mpegLayer == 3) hdr.bitrate = 56;
-        } else {
-            if (hdr.mpegLayer == 1) hdr.bitrate = 64;
-            else                    hdr.bitrate = 32;
-        }
-        break;
-    case 0b0101:
-        if (hdr.mpegVersion == MPEG_V1) {
-            if      (hdr.mpegLayer == 1) hdr.bitrate = 160;
-            else if (hdr.mpegLayer == 2) hdr.bitrate = 80;
-            else if (hdr.mpegLayer == 3) hdr.bitrate = 64;
-        } else {
-            if (hdr.mpegLayer == 1) hdr.bitrate = 80;
-            else                    hdr.bitrate = 40;
-        }
-        break;
-    case 0b0110:
-        if (hdr.mpegVersion == MPEG_V1) {
-            if      (hdr.mpegLayer == 1) hdr.bitrate = 192;
-            else if (hdr.mpegLayer == 2) hdr.bitrate = 96;
-            else if (hdr.mpegLayer == 3) hdr.bitrate = 80;
-        } else {
-            if (hdr.mpegLayer == 1) hdr.bitrate = 96;
-            else                    hdr.bitrate = 48;
-        }
-        break;
-    case 0b0111:
-        if (hdr.mpegVersion == MPEG_V1) {
-            if      (hdr.mpegLayer == 1) hdr.bitrate = 224;
-            else if (hdr.mpegLayer == 2) hdr.bitrate = 112;
-            else if (hdr.mpegLayer == 3) hdr.bitrate = 96;
-        } else {
-            if (hdr.mpegLayer == 1) hdr.bitrate = 112;
-            else                    hdr.bitrate = 56;
-        }
-        break;
-    case 0b1000:
-        if (hdr.mpegVersion == MPEG_V1) {
-            if      (hdr.mpegLayer == 1) hdr.bitrate = 256;
-            else if (hdr.mpegLayer == 2) hdr.bitrate = 128;
-            else if (hdr.mpegLayer == 3) hdr.bitrate = 112;
-        } else {
-            if (hdr.mpegLayer == 1) hdr.bitrate = 128;
-            else                    hdr.bitrate = 64;
-        }
-        break;
-    case 0b1001:
-        if (hdr.mpegVersion == MPEG_V1) {
-            if      (hdr.mpegLayer == 1) hdr.bitrate = 288;
-            else if (hdr.mpegLayer == 2) hdr.bitrate = 160;
-            else if (hdr.mpegLayer == 3) hdr.bitrate = 128;
-        } else {
-            if (hdr.mpegLayer == 1) hdr.bitrate = 144;
-            else                    hdr.bitrate = 80;
-        }
-        break;
-    case 0b1010:
-        if (hdr.mpegVersion == MPEG_V1) {
-            if      (hdr.mpegLayer == 1) hdr.bitrate = 320;
-            else if (hdr.mpegLayer == 2) hdr.bitrate = 192;
-            else if (hdr.mpegLayer == 3) hdr.bitrate = 160;
-        } else {
-            if (hdr.mpegLayer == 1) hdr.bitrate = 190;
-            else                    hdr.bitrate = 96;
-        }
-        break;
-    case 0b1011:
-        if (hdr.mpegVersion == MPEG_V1) {
-            if      (hdr.mpegLayer == 1) hdr.bitrate = 352;
-            else if (hdr.mpegLayer == 2) hdr.bitrate = 224;
-            else if (hdr.mpegLayer == 3) hdr.bitrate = 192;
-        } else {
-            if (hdr.mpegLayer == 1) hdr.bitrate = 176;
-            else                    hdr.bitrate = 112;
-        }
-        break;
-    case 0b1100:
-        if (hdr.mpegVersion == MPEG_V1) {
-            if      (hdr.mpegLayer == 1) hdr.bitrate = 384;
-            else if (hdr.mpegLayer == 2) hdr.bitrate = 256;
-            else if (hdr.mpegLayer == 3) hdr.bitrate = 224;
-        } else {
-            if (hdr.mpegLayer == 1) hdr.bitrate = 192;
-            else                    hdr.bitrate = 128;
-        }
-        break;
-    case 0b1101:
-        if (hdr.mpegVersion == MPEG_V1) {
-            if      (hdr.mpegLayer == 1) hdr.bitrate = 416;
-            else if (hdr.mpegLayer == 2) hdr.bitrate = 320;
-            else if (hdr.mpegLayer == 3) hdr.bitrate = 256;
-        } else {
-            if (hdr.mpegLayer == 1) hdr.bitrate = 224;
-            else                    hdr.bitrate = 144;
-        }
-        break;
-    case 0b1110:
-        if (hdr.mpegVersion == MPEG_V1) {
-            if      (hdr.mpegLayer == 1) hdr.bitrate = 448;
-            else if (hdr.mpegLayer == 2) hdr.bitrate = 384;
-            else if (hdr.mpegLayer == 3) hdr.bitrate = 320;
-        } else {
-            if (hdr.mpegLayer == 1) hdr.bitrate = 256;
-            else                    hdr.bitrate = 160;
-        }
-        break;
-    case 0b1111:
-        return INVALID_HEADER;
+        case 0b0000:
+            hdr.bitrate = 0;
+            break;
+        case 0b1111:
+            return INVALID_HEADER;
+        
+        X_BITRATES
     }
+    
+    #undef X
 
     // Store the sample rate.
     //     bits     MPEG1       MPEG2       MPEG2.5
@@ -323,7 +220,8 @@ mpa_header ReadMPAHeader (uint8_t* headerLoc) {
     // Now that we've extracted everything out of the header, calculate the frame's size.
     // The formula is 144 * bitrate (bits/sec) / samplerate (Hz)
     // Add 1 if the padding bit is set, apparently.
-    // Note that the bitrate we get above is in kilobits per second.
+    // NOTE: hdr.bitrate is in kilobits per second and has to be converted.
+    // NOTE: the obtained frame size includes the header.
     // TODO: is this a Layer3-only thing? Do other MPEG audio frames behave the same?
     hdr.frameSize = 144 * (hdr.bitrate * 1000) / hdr.samplerate;
     if (hdr.framePadded) hdr.frameSize += 1;
@@ -344,6 +242,7 @@ mpa_header GetFirstHeader (uint8_t* firstLoc, uint8_t* lastLoc) {
 }
 
 // Get the next valid header, given a header and a last allowable search location.
+// Skips over the given header's frame.
 mpa_header GetNextHeader (mpa_header* lastHdr, uint8_t* lastLoc) {
     return GetFirstHeader(lastHdr->location + lastHdr->frameSize, lastLoc);
 }
@@ -378,18 +277,22 @@ size_t GetID3v2TagSize (uint8_t* loc) {
     }
 }
 
-// Load an entire file into memory as a null-terminated string.
+// Struct for an in-memory file.
 typedef struct mem_file_s {
     size_t   size;
     uint8_t* mem;
 } mem_file;
+
+// Load an entire file into memory as a null-terminated string. Returns a mem_file object.
 mem_file ReadFileIntoMemory (char* filename) {
+    // Open the file:
     FILE* stream = fopen(filename, "r");
     if (stream == NULL) {
         fprintf(stderr, "ReadFile: failed to open %s\n", filename);
         exit(1);
     }
 
+    // Get the file's size and allocate a suitably-sized buffer:
     fseek(stream, 0, SEEK_END);
     size_t   size = ftell(stream);
     uint8_t* mem  = (uint8_t*) malloc(size + 1);
@@ -397,24 +300,32 @@ mem_file ReadFileIntoMemory (char* filename) {
         fprintf(stderr, "ReadFile: %lld byte allocation failed\n", (uint64_t) size);
         exit(1);
     }
-        
+    
+    // Rewind, read the file and close it.
     rewind(stream);
     fread(mem, 1, size, stream);
     fclose(stream);
 
+    // Add the null terminator and build up the mem_file object to return.
     mem[size] = '\0';
     mem_file mf = {size, mem};
     return mf;
 }
 
+
 int main() {
+    // Read the test file into memory and get a pointer to its contents:
     mem_file testFileObj = ReadFileIntoMemory("test.mp3");
     size_t fileStart  = (size_t) testFileObj.mem;
+    
+    // Get pointers to the first and last memory locations of the actual MPEG data:
     uint8_t* firstLoc = testFileObj.mem + GetID3v2TagSize(testFileObj.mem);
     uint8_t* lastLoc  = testFileObj.mem + testFileObj.size;
 
+    
+    // Locate and print the first MPEG header's details:
     printf("Starting MPEG header search at %08llx...\n", (uint64_t) (firstLoc - fileStart));
-
+    
     mpa_header firstHeader = GetFirstHeader(firstLoc, lastLoc);
     if (firstHeader.valid) {
         printf("First valid header at %08llx:\n", (uint64_t) (firstHeader.location - fileStart));
@@ -431,8 +342,10 @@ int main() {
     }
     printf("\n");
 
-    int nHeaders = 50;
-    bool printAllHeaders = true;
+    
+    // Print a table containing details for the first n MPEG headers:
+    int nHeaders = 50;           // how many headers to process
+    bool printAllHeaders = true; // if false, skip headers with different MPEG versions or layers
 
     if (printAllHeaders) {
         printf("Printing first %d MPEG headers found.\n\n", nHeaders);
@@ -443,14 +356,28 @@ int main() {
             firstHeader.mpegLayer);
     }
 
-    printf(" Location | MPEG | L | Kbps | Hz    | H | C | O | Frame \n");
+    printf(" Location | MPEG | L | Kbps | Hz    | E | C | O | Frame \n");
     printf("----------|------|---|------|-------|---|---|---|-------\n");
 
+    // Loop over each header starting with the previously obtained one.
     mpa_header header = firstHeader;
     while (header.valid && nHeaders > 0) {
+        // If printAllHeaders is false, check to see if this header's version and layer are correct:
         if (printAllHeaders || (
                 header.mpegVersion == firstHeader.mpegVersion || 
-                header.mpegLayer   == firstHeader.mpegLayer)) {
+                header.mpegLayer   == firstHeader.mpegLayer))
+        {
+            // Print a row for the current header, containing:
+            // - location in memory
+            // - MPEG version
+            // - MPEG layer
+            // - bitrate (kbps)
+            // - sample rate (Hz)
+            // - whether error checking is enabled for this header
+            // - whether the "copyright" flag is set
+            // - whether the "original" flag is set
+            // - frame size
+            
             printf(" %08llx | V%s | %d | %4d | %5d | %s | %s | %s | %5lld \n",
                 (uint64_t) (header.location - fileStart),
                 (header.mpegVersion == MPEG_V1)? "1  " :
@@ -462,9 +389,11 @@ int main() {
                 header.copyrightFlag? "Y" : " ",
                 header.originalFlag?  "Y" : " ",
                 (uint64_t) header.frameSize);
-            --nHeaders;
+                
+            // Get the next header and decrement the nHeaders counter:
+            header = GetNextHeader(&header, lastLoc);
+            nHeaders--;
         }
-        header = GetNextHeader(&header, lastLoc);
     }
 
     return 0;
